@@ -1,7 +1,7 @@
 /*
- * ESP32 BLE Yayın (Advertising) Kodu
- * Bu kod ESP32'yi BLE yayın yapan bir cihaz haline getirir
- * Telefonunuzdan bu cihazı bulabilir ve bağlanabilirsiniz
+ * ESP32 BLE Yayın (Advertising) - Basit ve Çalışan Versiyon
+ * Serial Monitor'de yayın durumunu görebilirsiniz
+ * Telefonunuzdan "ESP32-Test-Cihazi" adlı cihazı bulabilirsiniz
  */
 
 #include <BLEDevice.h>
@@ -9,18 +9,18 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 
-// Servis UUID'si (istediğiniz gibi değiştirebilirsiniz)
+// Servis UUID'si
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-// Karakteristik UUID'si (istediğiniz gibi değiştirebilirsiniz)
+// Karakteristik UUID'si
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+
+// Cihaz adı (telefonda görünecek)
+#define DEVICE_NAME "ESP32-Test-Cihazi"
 
 BLEServer *pServer = NULL;
 BLECharacteristic *pCharacteristic = NULL;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
-
-// Cihaz adı (telefonda görünecek isim)
-#define DEVICE_NAME "ESP32-Test-Cihazi"
 
 // Callback: Cihaz bağlandığında
 class MyServerCallbacks: public BLEServerCallbacks {
@@ -51,7 +51,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
 void setup() {
   // Serial başlat (Serial Monitor için)
   Serial.begin(115200);
-  delay(1000); // Serial başlatılana kadar bekle (ÖNEMLİ!)
+  delay(1000); // Serial başlatılana kadar bekle
   
   Serial.println();
   Serial.println("========================================");
@@ -72,15 +72,15 @@ void setup() {
   pServer->setCallbacks(new MyServerCallbacks());
   Serial.println("      ✓ BLE Server oluşturuldu");
   Serial.println();
-
+  
   // Servis oluştur
   Serial.println("[3/6] BLE Servis oluşturuluyor...");
   BLEService *pService = pServer->createService(SERVICE_UUID);
   Serial.println("      ✓ Servis oluşturuldu");
   Serial.println("      Servis UUID: " + String(SERVICE_UUID));
   Serial.println();
-
-  // Karakteristik oluştur (okuma, yazma, bildirim özellikli)
+  
+  // Karakteristik oluştur
   Serial.println("[4/6] Karakteristik oluşturuluyor...");
   pCharacteristic = pService->createCharacteristic(
                       CHARACTERISTIC_UUID,
@@ -101,7 +101,7 @@ void setup() {
   pService->start();
   Serial.println("      ✓ Servis başlatıldı");
   Serial.println();
-
+  
   // Yayın (advertising) başlat
   Serial.println("[6/6] YAYIN (ADVERTISING) BAŞLATILIYOR...");
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();

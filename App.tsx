@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -41,6 +41,7 @@ export default function App() {
   const [receivedData, setReceivedData] = useState<string[]>([]);
   const [bleAvailable, setBleAvailable] = useState(false);
   const [bleEnabled, setBleEnabled] = useState(false);
+  const devicesRef = useRef<BluetoothDevice[]>([]); // State güncellemesi için ref
 
   useEffect(() => {
     // İzinleri kontrol et ve iste
@@ -77,10 +78,15 @@ export default function App() {
     let bleManagerEmitter: NativeEventEmitter;
     
     try {
-      if (NativeModules.BleManager) {
-        bleManagerEmitter = new NativeEventEmitter(NativeModules.BleManager);
+      // react-native-ble-manager için NativeEventEmitter
+      // ÖNEMLİ: NativeModules.BleManager modülünü kullan
+      const BleManagerModule = NativeModules.BleManager;
+      if (BleManagerModule) {
+        bleManagerEmitter = new NativeEventEmitter(BleManagerModule);
+        console.log('✓ EventEmitter oluşturuldu (BleManager modülü ile)');
+        console.log('BleManager modülü:', BleManagerModule);
       } else {
-        // Fallback: direkt BleManager'dan event'leri dinle
+        console.warn('BleManager modülü bulunamadı, fallback kullanılıyor');
         bleManagerEmitter = new NativeEventEmitter();
       }
     } catch (error) {
@@ -88,28 +94,54 @@ export default function App() {
       bleManagerEmitter = new NativeEventEmitter();
     }
     
+    // Cihaz bulunduğunda event listener
+    // react-native-ble-manager event isimleri: 'BleManagerDiscoverPeripheral'
     const discoverPeripheralListener = bleManagerEmitter.addListener(
       'BleManagerDiscoverPeripheral',
-      (data: BluetoothDevice) => {
-        console.log('=== CİHAZ BULUNDU ===');
-        console.log('ID:', data.id);
-        console.log('İsim:', data.name || 'İsimsiz');
-        console.log('RSSI:', data.rssi);
-        console.log('Tam veri:', JSON.stringify(data, null, 2));
-        console.log('===================');
+      (data: any) => {
+        console.log('🔵 === CİHAZ BULUNDU EVENT TETİKLENDİ ===');
+        console.log('Ham veri:', data);
+        console.log('Veri tipi:', typeof data);
+        console.log('Veri keys:', Object.keys(data || {}));
         
-        if (data && data.id) {
+        // Veriyi BluetoothDevice formatına çevir
+        const device: BluetoothDevice = {
+          id: data.id || data.peripheral || '',
+          name: data.name || data.advertising?.localName || 'İsimsiz',
+          rssi: data.rssi || 0,
+          advertising: data.advertising || {},
+        };
+        
+        console.log('İşlenmiş cihaz:', device);
+        console.log('Cihaz ID:', device.id);
+        console.log('Cihaz İsim:', device.name);
+        console.log('Cihaz RSSI:', device.rssi);
+        console.log('========================================');
+        
+        if (device && device.id) {
+          console.log('Cihaz verisi işleniyor...');
           setDevices((prevDevices) => {
-            const exists = prevDevices.find((d) => d.id === data.id);
+            const exists = prevDevices.find((d) => d.id === device.id);
             if (!exists) {
-              console.log('Yeni cihaz listeye eklendi:', data.name || data.id);
-              return [...prevDevices, data];
+              console.log('✅ Yeni cihaz listeye eklendi:', device.name || device.id);
+              const newDevices = [...prevDevices, device];
+              devicesRef.current = newDevices; // Ref'i güncelle
+              console.log('📊 Toplam cihaz sayısı:', newDevices.length);
+              console.log('🔄 Cihaz listesi güncellendi, UI yenilenecek');
+              return newDevices;
+            } else {
+              console.log('⚠️ Cihaz zaten listede:', device.id);
             }
             return prevDevices;
           });
+        } else {
+          console.warn('❌ Geçersiz cihaz verisi - ID yok:', data);
         }
       }
     );
+    
+    console.log('✅ Event listener kuruldu: BleManagerDiscoverPeripheral');
+    console.log('Event listener aktif, cihazlar bekleniyor...');
 
     const stopScanListener = bleManagerEmitter.addListener(
       'BleManagerStopScan',
@@ -246,25 +278,75 @@ export default function App() {
       
       console.log('Tarama başlatılıyor...');
       console.log('Not: Cihazların yayın (advertising) yapması gerekir');
+      console.log('ESP32\'nin açık ve yakında olduğundan emin olun');
       
       // react-native-ble-manager scan: tüm cihazları tara
       // scan() - parametresiz, tüm cihazları tarar
-      BleManager.scan();
+      try {
+        console.log('Scan() fonksiyonu çağrılıyor...');
+        BleManager.scan();
+        console.log('✓ Scan() fonksiyonu başarıyla çağrıldı');
+        console.log('Event listener aktif, cihazlar dinleniyor...');
+        console.log('BleManager modülü kontrol:', NativeModules.BleManager ? 'Mevcut ✓' : 'Yok ✗');
+      } catch (scanError) {
+        console.error('❌ Scan() hatası:', scanError);
+        Alert.alert('Hata', `Tarama başlatılamadı: ${scanError}`);
+        throw scanError;
+      }
       
       console.log('Tarama başlatıldı, 10 saniye sürecek...');
       console.log('Yakındaki BLE cihazları aranıyor...');
+      console.log('⚠️ Eğer cihaz görünmüyorsa, event listener çalışmıyor olabilir');
+      
+      // Alternatif: getDiscoveredPeripherals() ile periyodik kontrol
+      // Event listener çalışmıyorsa bu yöntem kullanılabilir
+      const checkInterval = setInterval(async () => {
+        try {
+          const discovered = await BleManager.getDiscoveredPeripherals();
+          console.log('getDiscoveredPeripherals() sonucu:', discovered);
+          if (discovered && discovered.length > 0) {
+            console.log('✅ getDiscoveredPeripherals ile cihazlar bulundu:', discovered.length);
+            const formattedDevices: BluetoothDevice[] = discovered.map((p: any) => ({
+              id: p.id || p.peripheral || '',
+              name: p.name || p.advertising?.localName || 'İsimsiz',
+              rssi: p.rssi || 0,
+              advertising: p.advertising || {},
+            }));
+            setDevices(formattedDevices);
+            devicesRef.current = formattedDevices;
+          }
+        } catch (error) {
+          console.error('getDiscoveredPeripherals hatası:', error);
+        }
+      }, 2000); // Her 2 saniyede bir kontrol et
       
       // 10 saniye sonra otomatik durdur
-      setTimeout(() => {
+      setTimeout(async () => {
+        clearInterval(checkInterval); // Interval'i temizle
         console.log('10 saniye doldu, tarama durduruluyor...');
-        console.log('Bulunan cihaz sayısı:', devices.length);
-        if (devices.length === 0) {
-          Alert.alert(
-            'Bilgi', 
-            'Cihaz bulunamadı. Yakında yayın yapan bir BLE cihazı olduğundan emin olun.'
-          );
-        }
-        stopScan();
+        await stopScan();
+        // State güncellemesi tamamlanana kadar bekle
+        setTimeout(() => {
+          const currentDeviceCount = devicesRef.current.length;
+          console.log('Bulunan cihaz sayısı (ref):', currentDeviceCount);
+          console.log('Bulunan cihaz sayısı (state):', devices.length);
+          console.log('Bulunan cihazlar:', devicesRef.current.map(d => d.name || d.id));
+          
+          if (currentDeviceCount === 0) {
+            Alert.alert(
+              'Bilgi', 
+              'Cihaz bulunamadı.\n\n' +
+              'Kontrol edin:\n' +
+              '1. ESP32 açık ve yayın yapıyor mu?\n' +
+              '2. Konum servisi açık mı? (Android)\n' +
+              '3. İzinler verildi mi?\n' +
+              '4. ESP32 yakında mı? (10-20 cm)\n\n' +
+              'Event listener çalışmıyor olabilir, getDiscoveredPeripherals() denendi.'
+            );
+          } else {
+            console.log('✅ Cihazlar bulundu!');
+          }
+        }, 500);
       }, 10000);
     } catch (error) {
       console.error('Tarama hatası:', error);
@@ -296,6 +378,66 @@ export default function App() {
     } catch (error) {
       console.error('Bağlantı hatası:', error);
       Alert.alert('Hata', 'Cihaza bağlanılamadı');
+    }
+  };
+
+  // UUID ile direkt bağlanma (kısa scan ile)
+  const connectByUUID = async () => {
+    // ESP32'nin servis UUID'si (ESP32 kodundan)
+    const ESP32_SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+    const ESP32_DEVICE_NAME = 'ESP32-Test-Cihazi';
+    
+    try {
+      if (!bleAvailable || !bleEnabled) {
+        Alert.alert('Uyarı', 'Bluetooth hazır değil');
+        return;
+      }
+
+      console.log('UUID ile bağlanma deneniyor...');
+      console.log('Servis UUID:', ESP32_SERVICE_UUID);
+      
+      // Kısa bir tarama yap (sadece ESP32'yi bulmak için)
+      setIsScanning(true);
+      setDevices([]);
+      
+      // Servis UUID'sine göre filtreli tarama
+      // Not: react-native-ble-manager scan() parametresiz veya service UUID array'i alır
+      // Filtreli tarama için önce normal scan yapıp sonra filtreleriz
+      BleManager.scan();
+      
+      console.log('Filtreli tarama başlatıldı (5 saniye)...');
+      
+      // 5 saniye bekle ve ESP32'yi bul
+      setTimeout(async () => {
+        await BleManager.stopScan();
+        setIsScanning(false);
+        
+        console.log('Tarama tamamlandı, bulunan cihaz sayısı:', devices.length);
+        
+        // ESP32'yi bul (isim veya ID'ye göre)
+        const esp32Device = devices.find(d => 
+          d.name === ESP32_DEVICE_NAME || 
+          d.name?.toLowerCase().includes('esp32')
+        );
+        
+        if (esp32Device) {
+          console.log('ESP32 bulundu:', esp32Device.name || esp32Device.id);
+          console.log('Bağlanılıyor...');
+          await connectToDevice(esp32Device);
+        } else {
+          console.log('ESP32 bulunamadı');
+          Alert.alert(
+            'ESP32 Bulunamadı', 
+            'Lütfen ESP32\'nin açık ve yakında olduğundan emin olun.\n\n' +
+            'Servis UUID: ' + ESP32_SERVICE_UUID
+          );
+        }
+      }, 5000);
+      
+    } catch (error) {
+      console.error('UUID bağlantı hatası:', error);
+      Alert.alert('Hata', `UUID ile bağlanılamadı: ${error}`);
+      setIsScanning(false);
     }
   };
 
@@ -377,13 +519,23 @@ export default function App() {
 
       <View style={styles.buttonContainer}>
         {!isScanning && !connectedDevice && (
-          <TouchableOpacity 
-            style={[styles.button, !bleEnabled && styles.buttonDisabled]} 
-            onPress={startScan}
-            disabled={!bleEnabled}
-          >
-            <Text style={styles.buttonText}>Cihazları Tara</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity 
+              style={[styles.button, !bleEnabled && styles.buttonDisabled]} 
+              onPress={startScan}
+              disabled={!bleEnabled}
+            >
+              <Text style={styles.buttonText}>Cihazları Tara</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.button, styles.uuidButton, !bleEnabled && styles.buttonDisabled]} 
+              onPress={connectByUUID}
+              disabled={!bleEnabled}
+            >
+              <Text style={styles.buttonText}>ESP32'ye Direkt Bağlan (UUID)</Text>
+            </TouchableOpacity>
+          </>
         )}
 
         {isScanning && (
@@ -482,6 +634,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     minWidth: 200,
     alignItems: 'center',
+    marginBottom: 10,
+  },
+  uuidButton: {
+    backgroundColor: '#4CAF50',
   },
   buttonDisabled: {
     backgroundColor: '#ccc',
