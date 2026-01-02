@@ -152,10 +152,25 @@ void loop() {
     
     if (currentTime - lastTime >= 2000) {
       String message = "ESP32'den veri: " + String(millis() / 1000) + " saniye";
+      
+      // Veriyi set et
       pCharacteristic->setValue(message.c_str());
+      Serial.println(">>> VERİ SET EDİLDİ: " + message + " <<<");
+      
+      // Notification gönder (notify() void döndürür, sonuç kontrol edilemez)
       pCharacteristic->notify();
+      Serial.println(">>> NOTIFY ÇAĞRILDI <<<");
+      
       Serial.println(">>> VERİ GÖNDERİLDİ: " + message + " <<<");
+      Serial.println(">>> Karakteristik değeri: " + String(pCharacteristic->getValue().c_str()) + " <<<");
       lastTime = currentTime;
+    }
+  } else {
+    // Bağlantı yoksa log
+    static unsigned long lastDisconnectedLog = 0;
+    if (millis() - lastDisconnectedLog >= 5000) {
+      Serial.println(">>> UYARI: Cihaz bağlı değil, veri gönderilemiyor! <<<");
+      lastDisconnectedLog = millis();
     }
   }
   

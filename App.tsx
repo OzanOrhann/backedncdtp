@@ -154,9 +154,19 @@ export default function App() {
     const connectListener = bleManagerEmitter.addListener(
       'BleManagerConnectPeripheral',
       (data: { peripheral: string }) => {
-        console.log('Cihaz bağlandı:', data.peripheral);
+        console.log('🔵 ========================================');
+        console.log('🔵 === ESP32 BAĞLANTISI KURULDU! ===');
+        console.log('🔵 ========================================');
+        console.log('Cihaz ID:', data.peripheral);
+        const deviceName = devicesRef.current.find(d => d.id === data.peripheral)?.name || 'Bilinmeyen';
+        console.log('Cihaz İsim:', deviceName);
+        console.log('Bağlantı zamanı:', new Date().toLocaleTimeString());
+        console.log('========================================');
+        
         setConnectedDevice(data.peripheral);
-        Alert.alert('Başarılı', 'Cihaz bağlandı');
+        Alert.alert('✅ Başarılı', `${deviceName} bağlandı!`);
+        
+        // Servisleri keşfet ve notification başlat
         startNotification(data.peripheral);
       }
     );
@@ -164,7 +174,13 @@ export default function App() {
     const disconnectListener = bleManagerEmitter.addListener(
       'BleManagerDisconnectPeripheral',
       (data: { peripheral: string }) => {
-        console.log('Cihaz bağlantısı kesildi:', data.peripheral);
+        console.log('🔴 ========================================');
+        console.log('🔴 === ESP32 BAĞLANTISI KESİLDİ! ===');
+        console.log('🔴 ========================================');
+        console.log('Cihaz ID:', data.peripheral);
+        console.log('Bağlantı kesilme zamanı:', new Date().toLocaleTimeString());
+        console.log('========================================');
+        
         setConnectedDevice(null);
         setReceivedData([]);
         Alert.alert('Bilgi', 'Cihaz bağlantısı kesildi');
@@ -174,7 +190,15 @@ export default function App() {
     const updateValueListener = bleManagerEmitter.addListener(
       'BleManagerDidUpdateValueForCharacteristic',
       (data: { value: number[]; peripheral: string; characteristic: string; service: string }) => {
-        console.log('Veri alındı:', data);
+        console.log('📥 ========================================');
+        console.log('📥 === YENİ VERİ ALINDI! (EVENT) ===');
+        console.log('📥 ========================================');
+        console.log('Cihaz ID:', data.peripheral);
+        console.log('Servis UUID:', data.service);
+        console.log('Karakteristik UUID:', data.characteristic);
+        console.log('Ham veri (byte array):', data.value);
+        console.log('Veri uzunluğu:', data.value?.length || 0);
+        
         try {
           // Byte array'i string'e çevir
           const bytes = data.value;
@@ -183,18 +207,34 @@ export default function App() {
             decodedData += String.fromCharCode(bytes[i]);
           }
           
-          setReceivedData((prev) => [decodedData, ...prev]);
+          console.log('Decode edilmiş veri:', decodedData);
+          console.log('Zaman:', new Date().toLocaleTimeString());
+          console.log('========================================');
+          
+          // State'e ekle (ekranda görünecek)
+          setReceivedData((prev) => {
+            const newData = [decodedData, ...prev];
+            console.log('📊 Toplam alınan veri sayısı:', newData.length);
+            console.log('✅ Veri ekrana eklendi');
+            return newData;
+          });
           
           // Bildirim gönder
           sendNotification(
             'Bluetooth Verisi Alındı',
             `Yeni veri: ${decodedData}`
           );
+          console.log('🔔 Bildirim gönderildi');
         } catch (error) {
-          console.error('Veri decode hatası:', error);
+          console.error('❌ Veri decode hatası:', error);
+          // Hata olsa bile raw data'yı göster
+          const errorData = `Hata: ${error}`;
+          setReceivedData((prev) => [errorData, ...prev]);
         }
       }
     );
+    
+    console.log('✅ Event listener kuruldu: BleManagerDidUpdateValueForCharacteristic');
 
     return () => {
       discoverPeripheralListener.remove();
@@ -308,12 +348,22 @@ export default function App() {
             console.log('✅ getDiscoveredPeripherals ile cihazlar bulundu:', discovered.length);
             const formattedDevices: BluetoothDevice[] = discovered.map((p: any) => ({
               id: p.id || p.peripheral || '',
-              name: p.name || p.advertising?.localName || 'İsimsiz',
+              name: p.name || p.advertising?.localName || p.advertising?.name || 'İsimsiz',
               rssi: p.rssi || 0,
               advertising: p.advertising || {},
             }));
-            setDevices(formattedDevices);
-            devicesRef.current = formattedDevices;
+            // State'i güncelle - önceki cihazları koru, yeni olanları ekle
+            setDevices((prevDevices) => {
+              const mergedDevices = [...prevDevices];
+              formattedDevices.forEach(newDevice => {
+                const exists = mergedDevices.find(d => d.id === newDevice.id);
+                if (!exists && newDevice.id) {
+                  mergedDevices.push(newDevice);
+                }
+              });
+              devicesRef.current = mergedDevices;
+              return mergedDevices;
+            });
           }
         } catch (error) {
           console.error('getDiscoveredPeripherals hatası:', error);
@@ -366,18 +416,44 @@ export default function App() {
 
   const connectToDevice = async (device: BluetoothDevice) => {
     try {
+      console.log('🔵 ========================================');
+      console.log('🔵 === ESP32 BAĞLANTISI BAŞLATILIYOR ===');
+      console.log('🔵 ========================================');
+      console.log('Cihaz ID:', device.id);
+      console.log('Cihaz İsim:', device.name || 'İsimsiz');
+      console.log('RSSI:', device.rssi);
+      console.log('Bağlantı zamanı:', new Date().toLocaleTimeString());
+      
       stopScan();
       
+      console.log('Bağlantı kuruluyor...');
       await BleManager.connect(device.id);
+      console.log('✓ BleManager.connect() başarılı');
+      
       setConnectedDevice(device.id);
+      console.log('✓ State güncellendi: connectedDevice =', device.id);
       
       // Servisleri keşfet
+      console.log('Servisler keşfediliyor...');
       await BleManager.retrieveServices(device.id);
+      console.log('✓ Servisler keşfedildi');
       
-      Alert.alert('Başarılı', `${device.name || 'Cihaz'} bağlandı`);
+      console.log('========================================');
+      console.log('✅ ESP32 BAĞLANTISI KURULDU!');
+      console.log('========================================');
+      
+      Alert.alert('✅ Başarılı', `${device.name || 'Cihaz'} bağlandı!`);
+      
+      // Notification başlat
+      startNotification(device.id);
     } catch (error) {
-      console.error('Bağlantı hatası:', error);
-      Alert.alert('Hata', 'Cihaza bağlanılamadı');
+      console.error('❌ ========================================');
+      console.error('❌ === BAĞLANTI HATASI ===');
+      console.error('❌ ========================================');
+      console.error('Hata:', error);
+      console.error('Cihaz ID:', device.id);
+      console.error('========================================');
+      Alert.alert('Hata', `Cihaza bağlanılamadı: ${error}`);
     }
   };
 
@@ -443,25 +519,133 @@ export default function App() {
 
   const startNotification = async (peripheralId: string) => {
     try {
-      // retrieveServices sonrası servisler event'lerden gelir
-      // Basit yaklaşım: Tüm karakteristikler için notification dene
-      // Not: Gerçek uygulamada servis ve karakteristik UUID'lerini bilmeniz gerekir
+      console.log('🔔 ========================================');
+      console.log('🔔 === NOTIFICATION BAŞLATILIYOR ===');
+      console.log('🔔 ========================================');
+      console.log('Cihaz ID:', peripheralId);
       
-      // Örnek: Bilinen bir servis ve karakteristik için
-      // Bu kısmı kendi Bluetooth cihazınızın UUID'lerine göre düzenleyin
+      // ESP32'nin servis ve karakteristik UUID'leri
+      const ESP32_SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+      const ESP32_CHARACTERISTIC_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+      
+      console.log('Servis UUID:', ESP32_SERVICE_UUID);
+      console.log('Karakteristik UUID:', ESP32_CHARACTERISTIC_UUID);
+      
       try {
-        // Genel servis ve karakteristik örneği (kendi cihazınıza göre değiştirin)
-        // await BleManager.startNotification(peripheralId, 'SERVICE_UUID', 'CHARACTERISTIC_UUID');
-        console.log('Notification başlatıldı. Servis/karakteristik UUID\'lerini cihazınıza göre ayarlayın.');
+        console.log('Notification başlatılıyor...');
+        await BleManager.startNotification(peripheralId, ESP32_SERVICE_UUID, ESP32_CHARACTERISTIC_UUID);
+        console.log('✅ Notification başlatıldı!');
+        console.log('📡 Veri dinleniyor, ESP32\'den veri geldiğinde görünecek...');
+        console.log('========================================');
+        
+        // Alternatif: Event listener çalışmıyorsa periyodik olarak read yap
+        // Her 2 saniyede bir veriyi oku (ESP32 her 2 saniyede bir gönderiyor)
+        console.log('🔄 Periyodik veri okuma başlatılıyor...');
+        console.log('🔄 Her 2 saniyede bir veri okunacak');
+        
+        let isReading = true; // Okuma durumu kontrolü
+        const targetPeripheralId = peripheralId; // Closure için sakla
+        
+        const readInterval = setInterval(async () => {
+          // Basit kontrol: sadece isReading flag'ini kontrol et
+          if (!isReading) {
+            console.log('🔄 Periyodik okuma durduruldu');
+            clearInterval(readInterval);
+            return;
+          }
+          
+          try {
+            console.log('📖 ========================================');
+            console.log('📖 === PERİYODİK VERİ OKUMA ===');
+            console.log('📖 ========================================');
+            console.log('📖 Cihaz ID:', targetPeripheralId);
+            console.log('📖 Servis UUID:', ESP32_SERVICE_UUID);
+            console.log('📖 Karakteristik UUID:', ESP32_CHARACTERISTIC_UUID);
+            console.log('📖 Okuma zamanı:', new Date().toLocaleTimeString());
+            
+            const data = await BleManager.read(targetPeripheralId, ESP32_SERVICE_UUID, ESP32_CHARACTERISTIC_UUID);
+            console.log('📖 Okunan veri (byte array):', data);
+            console.log('📖 Veri uzunluğu:', data?.length || 0);
+            
+            if (data && data.length > 0) {
+              // Byte array'i string'e çevir
+              let decodedData = '';
+              for (let i = 0; i < data.length; i++) {
+                decodedData += String.fromCharCode(data[i]);
+              }
+              
+              console.log('📖 Decode edilmiş veri:', decodedData);
+              console.log('========================================');
+              
+              // State'e ekle
+              setReceivedData((prev) => {
+                // Aynı veriyi tekrar eklememek için kontrol et
+                if (prev.length === 0 || prev[0] !== decodedData) {
+                  console.log('✅ Yeni veri ekrana eklendi (read ile)');
+                  console.log('📊 Toplam veri sayısı:', prev.length + 1);
+                  return [decodedData, ...prev];
+                } else {
+                  console.log('⚠️ Aynı veri, eklenmedi');
+                }
+                return prev;
+              });
+              
+              // Bildirim gönder
+              sendNotification(
+                'Bluetooth Verisi Alındı',
+                `Yeni veri: ${decodedData}`
+              );
+              console.log('🔔 Bildirim gönderildi');
+            } else {
+              console.log('⚠️ Veri boş veya null');
+            }
+          } catch (readError) {
+            console.error('❌ ========================================');
+            console.error('❌ === READ HATASI ===');
+            console.error('❌ ========================================');
+            console.error('❌ Hata:', readError);
+            console.error('❌ Hata detayı:', JSON.stringify(readError, null, 2));
+            console.error('========================================');
+          }
+        }, 2000); // ESP32 her 2 saniyede bir gönderiyor, 2 saniyede bir oku
+        
+        // Bağlantı kesildiğinde interval'i temizle
+        // Global bir referans sakla (disconnectDevice'da kullanılacak)
+        if (typeof window !== 'undefined') {
+          (window as any).__readIntervals = (window as any).__readIntervals || {};
+          (window as any).__readIntervals[peripheralId] = {
+            interval: readInterval,
+            stop: () => {
+              isReading = false;
+              clearInterval(readInterval);
+              console.log('🔄 Periyodik okuma durduruldu (bağlantı kesildi)');
+              delete (window as any).__readIntervals[peripheralId];
+            }
+          };
+        }
+        
+        console.log('✅ Periyodik veri okuma başlatıldı!');
+        console.log('📡 Her 2 saniyede bir ESP32\'den veri okunacak...');
+        
       } catch (error) {
-        console.error('Notification başlatma hatası:', error);
+        console.error('❌ Notification başlatma hatası:', error);
+        console.error('Hata detayı:', JSON.stringify(error, null, 2));
+        Alert.alert('Uyarı', `Notification başlatılamadı: ${error}\n\nServis ve karakteristik UUID'lerini kontrol edin.`);
       }
     } catch (error) {
-      console.error('Notification hatası:', error);
+      console.error('❌ Notification genel hatası:', error);
     }
   };
 
   const disconnectDevice = async () => {
+    // Periyodik okuma interval'lerini durdur
+    if (connectedDevice && typeof window !== 'undefined' && (window as any).__readIntervals) {
+      const intervals = (window as any).__readIntervals;
+      if (intervals[connectedDevice]) {
+        intervals[connectedDevice].stop();
+      }
+    }
+    
     if (connectedDevice) {
       try {
         await BleManager.disconnect(connectedDevice);
