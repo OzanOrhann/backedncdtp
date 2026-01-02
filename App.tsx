@@ -15,6 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import BleManager from 'react-native-ble-manager';
 import * as Notifications from 'expo-notifications';
 import * as DeviceInfo from 'expo-device';
+import RemoteMonitoring from './screens/RemoteMonitoring';
 
 // Bildirim handler'ı ayarla
 Notifications.setNotificationHandler({
@@ -41,6 +42,7 @@ export default function App() {
   const [receivedData, setReceivedData] = useState<string[]>([]);
   const [bleAvailable, setBleAvailable] = useState(false);
   const [bleEnabled, setBleEnabled] = useState(false);
+  const [currentScreen, setCurrentScreen] = useState<'home' | 'remote'>('home'); // Sayfa yönetimi
   const devicesRef = useRef<BluetoothDevice[]>([]); // State güncellemesi için ref
 
   useEffect(() => {
@@ -683,6 +685,11 @@ export default function App() {
     );
   }
 
+  // RemoteMonitoring sayfası
+  if (currentScreen === 'remote') {
+    return <RemoteMonitoring onBack={() => setCurrentScreen('home')} />;
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar style="auto" />
@@ -713,11 +720,11 @@ export default function App() {
             </TouchableOpacity>
             
             <TouchableOpacity 
-              style={[styles.button, styles.uuidButton, !bleEnabled && styles.buttonDisabled]} 
-              onPress={connectByUUID}
+              style={[styles.button, styles.remoteButton, !bleEnabled && styles.buttonDisabled]} 
+              onPress={() => setCurrentScreen('remote')}
               disabled={!bleEnabled}
             >
-              <Text style={styles.buttonText}>ESP32'ye Direkt Bağlan (UUID)</Text>
+              <Text style={styles.buttonText}>Uzaktan Katılıyorum</Text>
             </TouchableOpacity>
           </>
         )}
@@ -819,6 +826,10 @@ const styles = StyleSheet.create({
     minWidth: 200,
     alignItems: 'center',
     marginBottom: 10,
+  },
+  remoteButton: {
+    backgroundColor: '#4CAF50',
+    marginTop: 10,
   },
   uuidButton: {
     backgroundColor: '#4CAF50',
