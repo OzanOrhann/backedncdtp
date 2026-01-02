@@ -243,8 +243,29 @@ export default function App() {
         console.log('Bağlantı kesilme zamanı:', new Date().toLocaleTimeString());
         console.log('========================================');
         
+        // Periyodik okuma interval'lerini durdur
+        if (typeof window !== 'undefined' && (window as any).__readIntervals) {
+          const intervals = (window as any).__readIntervals;
+          if (intervals[data.peripheral]) {
+            console.log('🔄 Periyodik okuma interval\'i durduruluyor...');
+            intervals[data.peripheral].stop();
+          }
+        }
+        
         setConnectedDevice(null);
         setReceivedData([]);
+        setSentData([]);
+        setSendDataText('');
+        // Sensör verilerini sıfırla
+        setSensorData({
+          heartRate: null,
+          accelX: null,
+          accelY: null,
+          accelZ: null,
+          movement: 'unknown',
+          timestamp: Date.now(),
+          battery: null,
+        });
         Alert.alert('Bilgi', 'Cihaz bağlantısı kesildi');
       }
     );
@@ -759,8 +780,37 @@ export default function App() {
         const readInterval = setInterval(async () => {
           // Basit kontrol: sadece isReading flag'ini kontrol et
           if (!isReading) {
-            console.log('🔄 Periyodik okuma durduruldu');
+            console.log('🔄 Periyodik okuma durduruldu (isReading = false)');
             clearInterval(readInterval);
+            return;
+          }
+          
+          // Bağlantı durumunu kontrol et (her okuma öncesi)
+          try {
+            const isConnected = await BleManager.isPeripheralConnected(targetPeripheralId);
+            if (!isConnected) {
+              console.log('🔄 Bağlantı kesildi tespit edildi, periyodik okuma durduruluyor');
+              isReading = false;
+              clearInterval(readInterval);
+              if (typeof window !== 'undefined' && (window as any).__readIntervals) {
+                delete (window as any).__readIntervals[targetPeripheralId];
+              }
+              setConnectedDevice((current) => {
+                if (current === targetPeripheralId) {
+                  return null;
+                }
+                return current;
+              });
+              return;
+            }
+          } catch (checkError) {
+            // Bağlantı kontrolü başarısız, interval'i durdur
+            console.log('🔄 Bağlantı kontrolü başarısız, periyodik okuma durduruluyor');
+            isReading = false;
+            clearInterval(readInterval);
+            if (typeof window !== 'undefined' && (window as any).__readIntervals) {
+              delete (window as any).__readIntervals[targetPeripheralId];
+            }
             return;
           }
           
@@ -809,7 +859,32 @@ export default function App() {
             } else {
               console.log('⚠️ Veri boş veya null');
             }
-          } catch (readError) {
+          } catch (readError: any) {
+            // "Peripheral not connected" hatası durumunda interval'i durdur
+            const errorMessage = readError?.message || readError?.toString() || '';
+            if (errorMessage.includes('not connected') || 
+                errorMessage.includes('Peripheral not connected') ||
+                errorMessage.includes('disconnected')) {
+              console.log('🔄 ========================================');
+              console.log('🔄 Bağlantı kesildi tespit edildi!');
+              console.log('🔄 Periyodik okuma durduruluyor...');
+              console.log('🔄 ========================================');
+              isReading = false;
+              clearInterval(readInterval);
+              if (typeof window !== 'undefined' && (window as any).__readIntervals) {
+                delete (window as any).__readIntervals[targetPeripheralId];
+              }
+              // State'i güncelle
+              setConnectedDevice((current) => {
+                if (current === targetPeripheralId) {
+                  return null;
+                }
+                return current;
+              });
+              return;
+            }
+            
+            // Diğer hatalar için sadece log
             console.error('❌ ========================================');
             console.error('❌ === READ HATASI ===');
             console.error('❌ ========================================');
