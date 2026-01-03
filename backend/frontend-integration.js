@@ -6,6 +6,8 @@
 
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+import { detectAlarms } from './alarm-detection';
 
 // ============================================
 // YAPILANDIRMA
@@ -19,6 +21,10 @@ const BACKEND_URL = 'http://localhost:3000'; // BURAYA SERVER IP'NİZİ YAZIN!
 let socket = null;
 let deviceId = null;
 let deviceType = null;
+let activeHeartbeatInterval = null;
+let onThresholdsReceivedCallback = null;
+let lastActivityTime = null; // MONITOR için son aktivite zamanı
+let currentThresholds = null; // MONITOR için eşik değerleri
 
 // ============================================
 // 1. BACKEND BAĞLANTISI
@@ -35,7 +41,7 @@ export const connectToBackend = async (type, deviceInfo = {}) => {
     // Cihaz ID'si oluştur veya kayıtlı olanı kullan
     deviceId = await AsyncStorage.getItem('deviceId');
     if (!deviceId) {
-      deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      deviceId = `device_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
       await AsyncStorage.setItem('deviceId', deviceId);
     }
 
@@ -73,8 +79,8 @@ export const connectToBackend = async (type, deviceInfo = {}) => {
       console.log('📱 Cihaz kaydedildi:', data);
       
       // Eğer backend'den eşik değerleri geldiyse callback çağır
-      if (data.thresholds && window.__onThresholdsReceived) {
-        window.__onThresholdsReceived(data.thresholds);
+      if (data.thresholds && onThresholdsReceivedCallback) {
+        onThresholdsReceivedCallback(data.thresholds);
       }
     });
 
@@ -97,8 +103,8 @@ export const connectToBackend = async (type, deviceInfo = {}) => {
       }
     }, 30000);
 
-    // Temizleme için global'e kaydet
-    window.__heartbeatInterval = heartbeatInterval;
+    // Temizleme için module-level değişkene kaydet
+    activeHeartbeatInterval = heartbeatInterval;
 
     return { socket, deviceId, deviceType };
   } catch (error) {
@@ -180,13 +186,32 @@ export const sendThresholds = (targetDeviceId, thresholds) => {
 export const onReceiveThresholds = (callback) => {
   if (!socket) return;
 
-  // Global callback kaydet (registered event için)
-  window.__onThresholdsReceived = callback;
+  // Module-level callback kaydet (registered event için)
+  onThresholdsReceivedCallback = callback;
 
   socket.on('receive_thresholds', (data) => {
     console.log('📊 Eşik değerleri alındı:', data.thresholds);
     callback(data.thresholds);
   });
+};
+
+/**
+ * MONITOR için eşik değerlerini ayarla (alarm tespiti için)
+ * @param {object} thresholds - Eşik değerleri
+ */
+export const setMonitorThresholds = (thresholds) => {
+  currentThresholds = thresholds;
+  console.log('📊 MONITOR eşik değerleri ayarlandı:', thresholds);
+};
+
+/**
+ * MONITOR için PATIENT cihaz ID'sini ayarla (alarm göndermek için)
+ * @param {string} patientDeviceId - PATIENT cihaz ID'si
+ */
+export const setPatientDeviceId = (patientDeviceId) => {
+  // Bu fonksiyon MONITOR'da kullanılacak
+  // Eşleştirme sonrası PATIENT ID'sini kaydetmek için
+  console.log('📱 PATIENT cihaz ID ayarlandı:', patientDeviceId);
 };
 
 // ============================================
@@ -220,14 +245,83 @@ export const sendSensorData = (sensorData) => {
  * Sensör verilerini dinle (MONITOR cihazı için)
  * @param {Function} callback - (sensorData, fromDeviceId) => {}
  * Frontend'deki setSensorData ile direkt kullanılabilir
+ * 
+ * MONITOR'da otomatik alarm tespiti yapar ve PATIENT'a gönderir
  */
-export const onReceiveSensorData = (callback) => {
+export const onReceiveSensorData = (callback, options = {}) => {
   if (!socket) return;
+
+  const {
+    enableAutoAlarmDetection = false, // Otomatik alarm tespiti aktif mi?
+    thresholds = null, // Eşik değerleri (MONITOR için)
+    patientDeviceId = null, // PATIENT cihaz ID'si (alarm göndermek için)
+    onAlarmDetected = null // Alarm tespit edildiğinde callback
+  } = options;
 
   socket.on('receive_sensor_data', (data) => {
     console.log('📡 Sensör verisi alındı:', data.sensorData);
-    callback(data.sensorData, data.fromDeviceId);
+    const sensorData = data.sensorData;
+    const fromDeviceId = data.fromDeviceId;
+
+    // Callback'i çağır (UI güncellemesi için)
+    callback(sensorData, fromDeviceId);
+
+    // MONITOR'da otomatik alarm tespiti
+    if (enableAutoAlarmDetection && thresholds && patientDeviceId) {
+      // Son aktivite zamanını güncelle
+      if (sensorData.movement === 'active') {
+        lastActivityTime = Date.now();
+      }
+
+      // Alarm tespit et
+      const detectedAlarms = detectAlarms(
+        sensorData,
+        thresholds,
+        lastActivityTime
+      );
+
+      // Alarm tespit edildiyse PATIENT'a gönder
+      if (detectedAlarms.length > 0) {
+        console.log('🚨 MONITOR: Alarm tespit edildi:', detectedAlarms);
+        
+        detectedAlarms.forEach((alarm) => {
+          // PATIENT'a alarm gönder
+          sendAlarmToPatient(patientDeviceId, alarm);
+          
+          // Callback'i çağır (UI'da gösterilebilir)
+          if (onAlarmDetected) {
+            onAlarmDetected(alarm, fromDeviceId);
+          }
+        });
+      }
+    }
   });
+};
+
+/**
+ * MONITOR'dan PATIENT'a alarm gönder
+ * @param {string} patientDeviceId - PATIENT cihaz ID'si
+ * @param {object} alarm - Alarm objesi
+ */
+const sendAlarmToPatient = (patientDeviceId, alarm) => {
+  if (!socket) {
+    console.error('Socket bağlantısı yok');
+    return;
+  }
+
+  // Backend'e alarm gönder (PATIENT'a iletilecek)
+  socket.emit('send_alarm', {
+    alarm: {
+      id: alarm.id,
+      type: alarm.type,
+      message: alarm.message,
+      timestamp: alarm.timestamp,
+      acknowledged: alarm.acknowledged
+    },
+    targetDeviceId: patientDeviceId // PATIENT'a gönder
+  });
+
+  console.log('✅ MONITOR → PATIENT: Alarm gönderildi:', alarm);
 };
 
 // ============================================
@@ -364,8 +458,9 @@ export const onReceiveMessage = (callback) => {
  * Backend bağlantısını kes
  */
 export const disconnectFromBackend = () => {
-  if (window.__heartbeatInterval) {
-    clearInterval(window.__heartbeatInterval);
+  if (activeHeartbeatInterval) {
+    clearInterval(activeHeartbeatInterval);
+    activeHeartbeatInterval = null;
   }
 
   if (socket) {
@@ -376,6 +471,7 @@ export const disconnectFromBackend = () => {
 
   deviceId = null;
   deviceType = null;
+  onThresholdsReceivedCallback = null;
 };
 
 /**
@@ -421,6 +517,80 @@ export const onError = (callback) => {
 // Export all functions
 // ============================================
 
+// ============================================
+// OTOMATIK ENTEGRASYON (App.tsx'e dokunmadan)
+// ============================================
+
+/**
+ * App.tsx'in state'lerini otomatik dinle ve backend'e gönder
+ * Bu fonksiyon App.tsx'te çağrılmadan çalışmaz, ama minimal entegrasyon için hazır
+ * 
+ * Kullanım (App.tsx'te sadece 1 satır):
+ * import './backend/frontend-integration-auto';
+ * 
+ * VEYA manuel kullanım:
+ * import { autoIntegrate } from './backend/frontend-integration';
+ * autoIntegrate({ setSensorData, setAlarms, setThresholds, sendNotification });
+ */
+
+let autoIntegrationCallbacks = null;
+
+export const autoIntegrate = (callbacks) => {
+  autoIntegrationCallbacks = callbacks;
+  
+  // Otomatik olarak patient olarak bağlan
+  connectToBackend('patient', {
+    deviceName: Platform.OS === 'ios' ? 'iOS Device' : 'Android Device',
+    appVersion: '1.0.0'
+  });
+  
+  // Eşik değerlerini dinle ve callback ile güncelle
+  onReceiveThresholds((newThresholds) => {
+    if (autoIntegrationCallbacks && autoIntegrationCallbacks.setThresholds) {
+      autoIntegrationCallbacks.setThresholds(newThresholds);
+    }
+  });
+  
+  // Alarmları dinle ve callback ile ekle
+  onReceiveAlarm((alarm, fromDeviceId) => {
+    if (autoIntegrationCallbacks) {
+      if (autoIntegrationCallbacks.setAlarms) {
+        autoIntegrationCallbacks.setAlarms((prev) => [alarm, ...prev]);
+      }
+      if (autoIntegrationCallbacks.sendNotification) {
+        autoIntegrationCallbacks.sendNotification('🚨 ACİL DURUM', alarm.message);
+      }
+    }
+  });
+  
+  // Sensör verilerini dinle ve callback ile güncelle
+  onReceiveSensorData((data, fromDeviceId) => {
+    if (autoIntegrationCallbacks && autoIntegrationCallbacks.setSensorData) {
+      autoIntegrationCallbacks.setSensorData(data);
+    }
+  });
+  
+  console.log('✅ Otomatik entegrasyon başlatıldı');
+};
+
+/**
+ * Sensör verisini otomatik gönder (App.tsx'te parseSensorData sonrası çağrılabilir)
+ */
+export const autoSendSensorData = (sensorData) => {
+  if (isConnected() && deviceType === 'patient') {
+    sendSensorData(sensorData);
+  }
+};
+
+/**
+ * Alarmı otomatik gönder (App.tsx'te detectAlarms sonrası çağrılabilir)
+ */
+export const autoSendAlarm = (alarm) => {
+  if (isConnected() && deviceType === 'patient') {
+    sendAlarm(alarm);
+  }
+};
+
 export default {
   // Bağlantı
   connectToBackend,
@@ -455,5 +625,10 @@ export default {
   onReceiveMessage,
   
   // Hata yönetimi
-  onError
+  onError,
+  
+  // Otomatik entegrasyon
+  autoIntegrate,
+  autoSendSensorData,
+  autoSendAlarm
 };

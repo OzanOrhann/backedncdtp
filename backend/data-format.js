@@ -11,24 +11,12 @@
 /**
  * Bileklikten gelen ham veri formatı
  * Bu formatı bilekliğinizin göndereceği formata göre değiştirin
+ * 
+ * Desteklenen formatlar:
+ * - JSON: { hr: 75, ax: 0.1, ay: 0.2, az: 9.8, bat: 85, ts: timestamp }
+ * - CSV: "75,0.1,0.2,9.8,85,timestamp"
+ * - Hex: "4B0A14620055"
  */
-const WEARABLE_DATA_FORMAT = {
-  // Örnek 1: JSON format
-  example_json: {
-    hr: 75,           // Heart rate
-    ax: 0.1,          // Acceleration X
-    ay: 0.2,          // Acceleration Y  
-    az: 9.8,          // Acceleration Z
-    bat: 85,          // Battery
-    ts: 1704279553000 // Timestamp
-  },
-  
-  // Örnek 2: String format (comma separated)
-  example_string: "75,0.1,0.2,9.8,85,1704279553000",
-  
-  // Örnek 3: Hex format
-  example_hex: "4B0A14620055"
-};
 
 /**
  * Bileklik verisini uygulama formatına dönüştürme

@@ -115,44 +115,106 @@ app.get('/api/devices', (req, res) => {
 });
 
 app.get('/api/sensor-data/:deviceId', (req, res) => {
-  const { deviceId } = req.params;
-  const { limit = 100 } = req.query;
-  
-  const history = sensorDataHistory.get(deviceId) || [];
-  const limitedHistory = history.slice(0, parseInt(limit));
-  
-  res.json({
-    success: true,
-    deviceId,
-    count: limitedHistory.length,
-    data: limitedHistory
-  });
+  try {
+    const { deviceId } = req.params;
+    const { limit = 100 } = req.query;
+    
+    // Database'den oku
+    const dbData = db.getSensorData(deviceId, parseInt(limit));
+    
+    // Format: [{sensorData, timestamp}, ...]
+    // dbData zaten doğru formatta (JSON'dan direkt geliyor)
+    const formattedData = dbData.map(row => ({
+      sensorData: {
+        heartRate: row.heartRate,
+        accelX: row.accelX,
+        accelY: row.accelY,
+        accelZ: row.accelZ,
+        movement: row.movement,
+        battery: row.battery,
+        timestamp: row.timestamp
+      },
+      timestamp: row.timestamp || row.savedAt
+    }));
+    
+    res.json({
+      success: true,
+      deviceId,
+      count: formattedData.length,
+      data: formattedData
+    });
+  } catch (error) {
+    console.error('API hatası (sensor-data):', error);
+    res.status(500).json({
+      success: false,
+      error: 'Veri okunamadı'
+    });
+  }
 });
 
 app.get('/api/alarms/:deviceId', (req, res) => {
-  const { deviceId } = req.params;
-  const { limit = 50 } = req.query;
-  
-  const history = alarmHistory.get(deviceId) || [];
-  const limitedHistory = history.slice(0, parseInt(limit));
-  
-  res.json({
-    success: true,
-    deviceId,
-    count: limitedHistory.length,
-    alarms: limitedHistory
-  });
+  try {
+    const { deviceId } = req.params;
+    const { limit = 50 } = req.query;
+    
+    // Database'den oku
+    const dbAlarms = db.getAlarms(deviceId, parseInt(limit));
+    
+    // Format: [{alarm, timestamp}, ...]
+    // dbAlarms zaten doğru formatta (JSON'dan direkt geliyor)
+    const formattedAlarms = dbAlarms.map(row => ({
+      alarm: {
+        id: row.id,
+        type: row.type,
+        message: row.message,
+        timestamp: row.timestamp,
+        acknowledged: row.acknowledged || false
+      },
+      timestamp: row.timestamp || row.savedAt
+    }));
+    
+    res.json({
+      success: true,
+      deviceId,
+      count: formattedAlarms.length,
+      alarms: formattedAlarms
+    });
+  } catch (error) {
+    console.error('API hatası (alarms):', error);
+    res.status(500).json({
+      success: false,
+      error: 'Alarmlar okunamadı'
+    });
+  }
 });
 
 app.get('/api/thresholds/:deviceId', (req, res) => {
-  const { deviceId } = req.params;
-  const deviceThresholds = thresholds.get(deviceId);
-  
-  res.json({
-    success: true,
-    deviceId,
-    thresholds: deviceThresholds || null
-  });
+  try {
+    const { deviceId } = req.params;
+    
+    // Önce in-memory'den kontrol et (daha hızlı)
+    let deviceThresholds = thresholds.get(deviceId);
+    
+    // Yoksa database'den oku
+    if (!deviceThresholds) {
+      deviceThresholds = db.getThresholds(deviceId);
+      if (deviceThresholds) {
+        thresholds.set(deviceId, deviceThresholds);
+      }
+    }
+    
+    res.json({
+      success: true,
+      deviceId,
+      thresholds: deviceThresholds || null
+    });
+  } catch (error) {
+    console.error('API hatası (thresholds):', error);
+    res.status(500).json({
+      success: false,
+      error: 'Eşik değerleri okunamadı'
+    });
+  }
 });
 
 app.get('/api/pairs', (req, res) => {
@@ -273,25 +335,18 @@ io.on('connection', (socket) => {
       console.log('Monitör ID:', monitorId);
       console.log('');
 
-      // Her iki cihaza da bildir
-      const patientDevice = connectedDevices.get(patientId);
-      const monitorDevice = connectedDevices.get(monitorId);
+      // Her iki cihaza da bildir (zaten yukarıda aldık)
+      io.to(patientDevice.socketId).emit('paired', {
+        success: true,
+        pairedWith: monitorId,
+        role: 'patient'
+      });
 
-      if (patientDevice) {
-        io.to(patientDevice.socketId).emit('paired', {
-          success: true,
-          pairedWith: monitorId,
-          role: 'patient'
-        });
-      }
-
-      if (monitorDevice) {
-        io.to(monitorDevice.socketId).emit('paired', {
-          success: true,
-          pairedWith: patientId,
-          role: 'monitor'
-        });
-      }
+      io.to(monitorDevice.socketId).emit('paired', {
+        success: true,
+        pairedWith: patientId,
+        role: 'monitor'
+      });
 
       socket.emit('pair_success', { patientId, monitorId });
 
@@ -434,7 +489,7 @@ io.on('connection', (socket) => {
   
   socket.on('send_alarm', (data) => {
     try {
-      const { alarm } = data;
+      const { alarm, targetDeviceId } = data; // targetDeviceId: MONITOR'dan PATIENT'a gönderim için
       const fromDeviceId = getDeviceIdBySocketId(socket.id);
       
       if (!fromDeviceId) {
@@ -465,30 +520,46 @@ io.on('connection', (socket) => {
       console.log('Zaman:', new Date(alarm.timestamp).toLocaleString('tr-TR'));
       console.log('');
 
-      // Eşleştirilmiş monitöre gönder
-      const monitorId = devicePairs.get(fromDeviceId);
-      if (monitorId) {
-        const monitorDevice = connectedDevices.get(monitorId);
-        if (monitorDevice) {
-          io.to(monitorDevice.socketId).emit('receive_alarm', {
+      // Eğer targetDeviceId varsa (MONITOR'dan PATIENT'a gönderim)
+      if (targetDeviceId) {
+        const targetDevice = connectedDevices.get(targetDeviceId);
+        if (targetDevice) {
+          io.to(targetDevice.socketId).emit('receive_alarm', {
             alarm,
             fromDeviceId,
             timestamp: Date.now()
           });
-          console.log(`✅ Alarm ${monitorId} monitörüne iletildi`);
+          console.log(`✅ Alarm ${targetDeviceId} cihazına iletildi (MONITOR → PATIENT)`);
+        } else {
+          console.error(`❌ Hedef cihaz bulunamadı: ${targetDeviceId}`);
         }
       } else {
-        // Eşleştirilmemiş ise tüm monitörlere yayınla
-        connectedDevices.forEach((device, deviceId) => {
-          if (device.deviceType === DEVICE_TYPES.MONITOR) {
-            io.to(device.socketId).emit('receive_alarm', {
+        // PATIENT'tan MONITOR'a gönderim (normal akış)
+        // Eşleştirilmiş monitöre gönder
+        const monitorId = devicePairs.get(fromDeviceId);
+        if (monitorId) {
+          const monitorDevice = connectedDevices.get(monitorId);
+          if (monitorDevice) {
+            io.to(monitorDevice.socketId).emit('receive_alarm', {
               alarm,
               fromDeviceId,
               timestamp: Date.now()
             });
+            console.log(`✅ Alarm ${monitorId} monitörüne iletildi (PATIENT → MONITOR)`);
           }
-        });
-        console.log('✅ Alarm tüm monitörlere iletildi');
+        } else {
+          // Eşleştirilmemiş ise tüm monitörlere yayınla
+          connectedDevices.forEach((device, deviceId) => {
+            if (device.deviceType === DEVICE_TYPES.MONITOR) {
+              io.to(device.socketId).emit('receive_alarm', {
+                alarm,
+                fromDeviceId,
+                timestamp: Date.now()
+              });
+            }
+          });
+          console.log('✅ Alarm tüm monitörlere iletildi');
+        }
       }
 
       socket.emit('alarm_sent', { success: true });

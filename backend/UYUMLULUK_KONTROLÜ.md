@@ -309,8 +309,8 @@ setInterval(cleanOldData, 24 * 60 * 60 * 1000);
 
 **Eğer büyürse:**
 ```javascript
-// SQLite'a geçiş (mobil DB)
-npm install better-sqlite3
+// JSON database kullanılıyor (basit ve sorunsuz)
+// Ekstra kurulum gerekmez
 
 // veya MongoDB'ye geçiş (cloud DB)
 npm install mongodb

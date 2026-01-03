@@ -1,8 +1,8 @@
 /**
- * BASIT DOSYA TABANLI DATABASE
+ * BASIT DOSYA TABANLI DATABASE (JSON)
  * 
  * Verileri JSON dosyalarında saklar
- * SQLite veya başka bir DB'ye kolayca geçilebilir
+ * En basit ve sorunsuz çözüm
  */
 
 const fs = require('fs');
@@ -56,14 +56,15 @@ function saveSensorData(deviceId, sensorData) {
       data[deviceId] = [];
     }
     
-    // Son 500 veriyi tut (bellek tasarrufu)
-    data[deviceId].push({
+    // Yeni veriyi ekle (en başa - en yeni önce)
+    data[deviceId].unshift({
       ...sensorData,
       savedAt: Date.now()
     });
     
+    // Son 500 veriyi tut (bellek tasarrufu)
     if (data[deviceId].length > 500) {
-      data[deviceId] = data[deviceId].slice(-500);
+      data[deviceId] = data[deviceId].slice(0, 500);
     }
     
     fs.writeFileSync(SENSOR_DATA_FILE, JSON.stringify(data, null, 2));
@@ -83,7 +84,7 @@ function getSensorData(deviceId, limit = 100) {
   try {
     const data = JSON.parse(fs.readFileSync(SENSOR_DATA_FILE, 'utf8'));
     const deviceData = data[deviceId] || [];
-    // En yeni verileri döndür (array baştan sona doğru yeniden eskiye)
+    // En yeni verileri döndür (zaten en başta)
     return deviceData.slice(0, limit);
   } catch (error) {
     console.error('Sensör verisi okuma hatası:', error);
@@ -100,7 +101,7 @@ function getAllLatestSensorData() {
     const result = {};
     
     for (const [deviceId, values] of Object.entries(data)) {
-      result[deviceId] = values[values.length - 1] || null;
+      result[deviceId] = values[0] || null; // En yeni veri (en başta)
     }
     
     return result;
@@ -125,14 +126,15 @@ function saveAlarm(deviceId, alarm) {
       data[deviceId] = [];
     }
     
-    data[deviceId].push({
+    // Yeni alarmı ekle (en başa - en yeni önce)
+    data[deviceId].unshift({
       ...alarm,
       savedAt: Date.now()
     });
     
     // Son 200 alarm'ı tut
     if (data[deviceId].length > 200) {
-      data[deviceId] = data[deviceId].slice(-200);
+      data[deviceId] = data[deviceId].slice(0, 200);
     }
     
     fs.writeFileSync(ALARMS_FILE, JSON.stringify(data, null, 2));
@@ -150,7 +152,7 @@ function getAlarms(deviceId, limit = 50) {
   try {
     const data = JSON.parse(fs.readFileSync(ALARMS_FILE, 'utf8'));
     const deviceAlarms = data[deviceId] || [];
-    // En yeni alarmları döndür (array baştan sona doğru yeniden eskiye)
+    // En yeni alarmları döndür (zaten en başta)
     return deviceAlarms.slice(0, limit);
   } catch (error) {
     console.error('Alarm okuma hatası:', error);
