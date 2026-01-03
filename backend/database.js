@@ -83,7 +83,8 @@ function getSensorData(deviceId, limit = 100) {
   try {
     const data = JSON.parse(fs.readFileSync(SENSOR_DATA_FILE, 'utf8'));
     const deviceData = data[deviceId] || [];
-    return deviceData.slice(-limit);
+    // En yeni verileri döndür (array baştan sona doğru yeniden eskiye)
+    return deviceData.slice(0, limit);
   } catch (error) {
     console.error('Sensör verisi okuma hatası:', error);
     return [];
@@ -149,7 +150,8 @@ function getAlarms(deviceId, limit = 50) {
   try {
     const data = JSON.parse(fs.readFileSync(ALARMS_FILE, 'utf8'));
     const deviceAlarms = data[deviceId] || [];
-    return deviceAlarms.slice(-limit);
+    // En yeni alarmları döndür (array baştan sona doğru yeniden eskiye)
+    return deviceAlarms.slice(0, limit);
   } catch (error) {
     console.error('Alarm okuma hatası:', error);
     return [];

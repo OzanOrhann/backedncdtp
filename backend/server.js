@@ -251,6 +251,20 @@ io.on('connection', (socket) => {
         socket.emit('error', { message: 'Geçersiz eşleştirme bilgisi' });
         return;
       }
+      
+      // Cihazların bağlı olup olmadığını kontrol et
+      const patientDevice = connectedDevices.get(patientId);
+      const monitorDevice = connectedDevices.get(monitorId);
+      
+      if (!patientDevice) {
+        socket.emit('error', { message: 'Hasta cihazı bağlı değil' });
+        return;
+      }
+      
+      if (!monitorDevice) {
+        socket.emit('error', { message: 'Monitör cihazı bağlı değil' });
+        return;
+      }
 
       devicePairs.set(patientId, monitorId);
       
@@ -294,6 +308,12 @@ io.on('connection', (socket) => {
   socket.on('send_thresholds', (data) => {
     try {
       const { targetDeviceId, thresholds: newThresholds } = data;
+      
+      if (!targetDeviceId) {
+        console.error('❌ Hedef cihaz ID belirtilmedi');
+        socket.emit('error', { message: 'Hedef cihaz ID gerekli' });
+        return;
+      }
       
       console.log('\n📊 EŞİK DEĞERLERİ GÖNDERİLİYOR');
       console.log('Hedef:', targetDeviceId);
@@ -347,6 +367,12 @@ io.on('connection', (socket) => {
     try {
       const { sensorData } = data;
       const fromDeviceId = getDeviceIdBySocketId(socket.id);
+      
+      if (!fromDeviceId) {
+        console.error('❌ Cihaz ID bulunamadı (kayıtlı değil)');
+        socket.emit('error', { message: 'Cihaz kayıtlı değil' });
+        return;
+      }
       
       // Database'e kaydet
       db.saveSensorData(fromDeviceId, sensorData);
@@ -411,6 +437,12 @@ io.on('connection', (socket) => {
       const { alarm } = data;
       const fromDeviceId = getDeviceIdBySocketId(socket.id);
       
+      if (!fromDeviceId) {
+        console.error('❌ Cihaz ID bulunamadı (kayıtlı değil)');
+        socket.emit('error', { message: 'Cihaz kayıtlı değil' });
+        return;
+      }
+      
       // Database'e kaydet
       db.saveAlarm(fromDeviceId, alarm);
       
@@ -445,21 +477,22 @@ io.on('connection', (socket) => {
           });
           console.log(`✅ Alarm ${monitorId} monitörüne iletildi`);
         }
+      } else {
+        // Eşleştirilmemiş ise tüm monitörlere yayınla
+        connectedDevices.forEach((device, deviceId) => {
+          if (device.deviceType === DEVICE_TYPES.MONITOR) {
+            io.to(device.socketId).emit('receive_alarm', {
+              alarm,
+              fromDeviceId,
+              timestamp: Date.now()
+            });
+          }
+        });
+        console.log('✅ Alarm tüm monitörlere iletildi');
       }
 
-      // Tüm monitörlere de yayınla
-      connectedDevices.forEach((device, deviceId) => {
-        if (device.deviceType === DEVICE_TYPES.MONITOR) {
-          io.to(device.socketId).emit('receive_alarm', {
-            alarm,
-            fromDeviceId,
-            timestamp: Date.now()
-          });
-        }
-      });
-
       socket.emit('alarm_sent', { success: true });
-      console.log('✅ Alarm tüm monitörlere iletildi\n');
+      console.log('');
 
     } catch (error) {
       console.error('❌ Alarm gönderme hatası:', error);

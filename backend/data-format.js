@@ -70,11 +70,11 @@ function parseWearableData(rawData) {
     // Seçenek 3: Eğer hex formatında geliyorsa
     if (typeof rawData === 'string' && /^[0-9A-Fa-f]+$/.test(rawData)) {
       // Hex parsing örneği (özelleştirin)
-      const hr = parseInt(rawData.substr(0, 2), 16);
-      const ax = (parseInt(rawData.substr(2, 2), 16) - 128) / 10;
-      const ay = (parseInt(rawData.substr(4, 2), 16) - 128) / 10;
-      const az = (parseInt(rawData.substr(6, 2), 16) - 128) / 10;
-      const bat = parseInt(rawData.substr(8, 2), 16);
+      const hr = parseInt(rawData.substring(0, 2), 16);
+      const ax = (parseInt(rawData.substring(2, 4), 16) - 128) / 10;
+      const ay = (parseInt(rawData.substring(4, 6), 16) - 128) / 10;
+      const az = (parseInt(rawData.substring(6, 8), 16) - 128) / 10;
+      const bat = parseInt(rawData.substring(8, 10), 16);
       
       return {
         heartRate: hr,
