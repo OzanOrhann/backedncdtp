@@ -102,6 +102,10 @@ function calculateMovement(accelX, accelY, accelZ, fallThreshold = 2.5) {
   return 'idle';
 }
 
+// ES6 Modules export (React Native için)
+export { detectAlarms, calculateMovement };
+
+// CommonJS export (Node.js backend için - server.js kullanmıyor ama yine de uyumluluk için)
 module.exports = {
   detectAlarms,
   calculateMovement

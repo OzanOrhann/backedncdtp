@@ -15,6 +15,9 @@ const {
 // Database modülü
 const db = require('./database');
 
+// IP adresi algılama modülü
+const { getLocalIP, getAllLocalIPs } = require('./get-ip');
+
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, {
@@ -696,15 +699,43 @@ function getDeviceIdBySocketId(socketId) {
 // ============================================
 
 server.listen(PORT, '0.0.0.0', () => {
+  const localIP = getLocalIP();
+  const allIPs = getAllLocalIPs();
+  
   console.log('\n' + '='.repeat(60));
   console.log('🏥  ÇDTP BACKEND SERVER BAŞLATILDI');
   console.log('='.repeat(60));
   console.log(`📡  Port: ${PORT}`);
   console.log(`🌐  Local: http://localhost:${PORT}`);
-  console.log(`🌐  Network: http://[YOUR_IP]:${PORT}`);
-  console.log(`⏰  Zaman: ${new Date().toLocaleString('tr-TR')}`);
+  
+  if (localIP) {
+    console.log(`🌐  Network: http://${localIP}:${PORT}`);
+    console.log(`\n📱 Frontend için bu IP'yi kullanın: ${localIP}`);
+  } else {
+    console.log(`🌐  Network: http://[YOUR_IP]:${PORT}`);
+    console.log(`\n⚠️  IP adresi otomatik algılanamadı!`);
+  }
+  
+  if (allIPs.length > 0) {
+    console.log(`\n📋 Tüm IP Adresleri:`);
+    allIPs.forEach((ip, index) => {
+      console.log(`   ${index + 1}. ${ip.name}: http://${ip.address}:${PORT}`);
+    });
+  }
+  
+  // Tunnel URL varsa göster
+  if (process.env.TUNNEL_URL) {
+    console.log(`\n🌍 Tunnel: ${process.env.TUNNEL_URL}`);
+  }
+  
+  console.log(`\n⏰  Zaman: ${new Date().toLocaleString('tr-TR')}`);
   console.log('='.repeat(60));
   console.log('\n✅  Server hazır, cihaz bağlantıları bekleniyor...\n');
+  
+  // IP adresini .env dosyasına kaydet (opsiyonel)
+  if (localIP && process.env.AUTO_SAVE_IP !== 'false') {
+    console.log(`💡 İpucu: Frontend'de bu IP'yi kullanın: ${localIP}`);
+  }
 });
 
 // ============================================

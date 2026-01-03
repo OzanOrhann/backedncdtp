@@ -7,15 +7,69 @@
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+// alarm-detection ES6 modules kullanıyor (React Native için uyumlu)
 import { detectAlarms } from './alarm-detection';
 
 // ============================================
 // YAPILANDIRMA
 // ============================================
 
-// Backend server URL'i - Kendi server IP'nizi buraya yazın
-// Örnek: 'http://192.168.1.100:3000' veya 'https://your-backend.com'
-const BACKEND_URL = 'http://localhost:3000'; // BURAYA SERVER IP'NİZİ YAZIN!
+// Backend server URL'i - Otomatik algılama veya manuel ayar
+// ⚠️ ÖNEMLİ: React Native fiziksel cihazda veya emülatörde localhost kullanamaz!
+
+// Seçenek 1: AsyncStorage'dan oku (önerilen - otomatik)
+// Seçenek 2: Manuel IP adresi yazın
+// Seçenek 3: Tunnel URL kullanın (ngrok, cloudflare tunnel, vs.)
+
+// Varsayılan değer (AsyncStorage'da yoksa kullanılır)
+// ⚠️ Cloud deployment için Railway/Render/Fly.io URL'inizi yazın
+// Örnek: 'https://your-project.railway.app'
+// Local development için: 'http://192.168.1.30:3000'
+const DEFAULT_BACKEND_URL = 
+  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_BACKEND_URL) ||
+  'http://192.168.1.30:3000'; // ⚠️ Cloud URL veya local IP yazın
+
+// Tunnel URL kullanmak için (ngrok, cloudflare tunnel, vs.)
+// const TUNNEL_URL = 'https://your-tunnel-url.ngrok.io'; // Uncomment edin ve URL'i yazın
+
+// Otomatik IP algılama için AsyncStorage'dan oku
+let BACKEND_URL = DEFAULT_BACKEND_URL;
+
+// AsyncStorage'dan backend URL'ini oku
+AsyncStorage.getItem('backend_url').then((savedUrl) => {
+  if (savedUrl) {
+    BACKEND_URL = savedUrl;
+    console.log('✅ Backend URL AsyncStorage\'dan yüklendi:', BACKEND_URL);
+  } else {
+    console.log('💡 Backend URL ayarlanmadı, varsayılan kullanılıyor:', BACKEND_URL);
+    console.log('💡 IP adresini ayarlamak için: setBackendUrl("http://YOUR_IP:3000")');
+  }
+}).catch((error) => {
+  console.warn('⚠️ AsyncStorage okuma hatası, varsayılan URL kullanılıyor:', error);
+});
+
+// Backend URL'ini dinamik olarak ayarlama fonksiyonu
+export const setBackendUrl = async (url) => {
+  try {
+    BACKEND_URL = url;
+    await AsyncStorage.setItem('backend_url', url);
+    console.log('✅ Backend URL güncellendi:', url);
+    
+    // Eğer bağlıysa yeniden bağlan
+    if (socket && socket.connected) {
+      socket.disconnect();
+      socket = null;
+      console.log('💡 Yeniden bağlanmak için connectToBackend() çağırın');
+    }
+  } catch (error) {
+    console.error('❌ Backend URL ayarlama hatası:', error);
+  }
+};
+
+// Backend URL'ini alma fonksiyonu
+export const getBackendUrl = () => {
+  return BACKEND_URL;
+};
 
 // Socket instance
 let socket = null;
