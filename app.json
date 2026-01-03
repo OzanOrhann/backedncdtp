@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -16,7 +16,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "Bu uygulama Bluetooth cihazlarıyla iletişim kurmak için Bluetooth erişimine ihtiyaç duyar.",
-        "NSBluetoothPeripheralUsageDescription": "Bu uygulama Bluetooth cihazlarıyla iletişim kurmak için Bluetooth erişimine ihtiyaç duyar."
+        "NSBluetoothPeripheralUsageDescription": "Bu uygulama Bluetooth cihazlarıyla iletişim kurmak için Bluetooth erişimine ihtiyaç duyar.",
+        "ITSAppUsesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.anonymous.expocdtp"
     },
@@ -52,8 +53,9 @@
     },
     "extra": {
       "eas": {
-        "projectId": "9b181642-46b6-4d88-98e6-0e9dc1401c16"
+        "projectId": "3d0ac0f0-c8ea-4320-bba4-014cf05b9f82"
       }
-    }
+    },
+    "owner": "ozanorhann44"
   }
 }
