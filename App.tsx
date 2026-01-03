@@ -18,6 +18,19 @@ import * as Notifications from 'expo-notifications';
 import * as DeviceInfo from 'expo-device';
 import RemoteMonitoring from './screens/RemoteMonitoring';
 
+// Backend entegrasyonu
+import { 
+  connectToBackend, 
+  sendSensorData, 
+  sendAlarm,
+  onReceiveThresholds,
+  onReceiveAlarm,
+  onReceiveSensorData,
+  sendThresholds,
+  setMonitorThresholds,
+  getDeviceInfo
+} from './backend/frontend-integration';
+
 // Bildirim handler'ı ayarla
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -135,6 +148,20 @@ export default function App() {
     };
 
     initBle();
+
+    // Backend bağlantısı (PATIENT)
+    const initBackend = async () => {
+      try {
+        await connectToBackend('patient', {
+          deviceName: 'Hasta Telefon',
+          appVersion: '1.0.0'
+        });
+        console.log('✅ Backend\'e bağlandı (PATIENT)');
+      } catch (error) {
+        console.error('❌ Backend bağlantı hatası:', error);
+      }
+    };
+    initBackend();
 
     // Event listener'ları ayarla - react-native-ble-manager için doğru yöntem
     let bleManagerEmitter: NativeEventEmitter;
@@ -314,12 +341,17 @@ export default function App() {
               setAlarms((prev) => [...newAlarms, ...prev]);
               console.log('🚨 Yeni alarmlar tespit edildi:', newAlarms);
               
-              // Her alarm için bildirim gönder
+              // Her alarm için bildirim gönder ve backend'e gönder
               newAlarms.forEach((alarm) => {
                 sendNotification(
                   '🚨 ACİL DURUM',
                   alarm.message
                 );
+                
+                // Backend'e gönder (MONITOR'a iletilecek)
+                if (getDeviceInfo().connected) {
+                  sendAlarm(alarm);
+                }
               });
             }
           }
@@ -344,6 +376,34 @@ export default function App() {
       updateValueListener.remove();
     };
   }, []);
+
+  // ============================================
+  // BACKEND ENTEGRASYONU
+  // ============================================
+
+  // MONITOR'dan eşik değerleri geldiğinde
+  useEffect(() => {
+    onReceiveThresholds((newThresholds: Thresholds) => {
+      console.log('📊 Eşik değerleri güncellendi:', newThresholds);
+      setThresholds(newThresholds);
+    });
+  }, []);
+
+  // MONITOR'dan alarm geldiğinde
+  useEffect(() => {
+    onReceiveAlarm((alarm: Alarm) => {
+      console.log('🚨 Alarm alındı (MONITOR\'dan):', alarm);
+      setAlarms(prev => [alarm, ...prev]);
+      sendNotification('🚨 MONITOR ALARM', alarm.message);
+    });
+  }, []);
+
+  // Sensör verisi güncellendiğinde MONITOR'a gönder
+  useEffect(() => {
+    if (sensorData.heartRate !== null && getDeviceInfo().connected) {
+      sendSensorData(sensorData);
+    }
+  }, [sensorData]);
 
   const requestPermissions = async () => {
     if (Platform.OS === 'android') {
@@ -1033,6 +1093,64 @@ export default function App() {
     );
   }
 
+  // ============================================
+  // MONITOR ROLÜ (RemoteMonitoring ekranı açıldığında)
+  // ============================================
+  useEffect(() => {
+    if (currentScreen === 'remote') {
+      // MONITOR olarak bağlan
+      const initMonitor = async () => {
+        try {
+          await connectToBackend('monitor', {
+            deviceName: 'Monitor Telefon',
+            appVersion: '1.0.0'
+          });
+          console.log('✅ Backend\'e bağlandı (MONITOR)');
+          
+          // Eşik değerlerini MONITOR'a ayarla (alarm tespiti için)
+          setMonitorThresholds(thresholds);
+          
+          // PATIENT'tan sensör verisi geldiğinde
+          onReceiveSensorData(
+            (receivedSensorData: SensorData, fromDeviceId: string) => {
+              console.log('📡 Sensör verisi alındı (MONITOR):', receivedSensorData);
+              setSensorData(receivedSensorData);
+            },
+            {
+              enableAutoAlarmDetection: true,
+              thresholds: thresholds,
+              patientDeviceId: getDeviceInfo().deviceId,
+              onAlarmDetected: (alarm: Alarm) => {
+                console.log('🚨 MONITOR: Alarm tespit edildi:', alarm);
+                setAlarms(prev => [alarm, ...prev]);
+                sendNotification('🚨 ALARM', alarm.message);
+              }
+            }
+          );
+          
+          // PATIENT'tan alarm geldiğinde
+          onReceiveAlarm((alarm: Alarm) => {
+            console.log('🚨 Alarm alındı (PATIENT\'tan):', alarm);
+            setAlarms(prev => [alarm, ...prev]);
+            sendNotification('🚨 PATIENT ALARM', alarm.message);
+          });
+        } catch (error) {
+          console.error('❌ MONITOR bağlantı hatası:', error);
+        }
+      };
+      
+      initMonitor();
+    }
+  }, [currentScreen, thresholds]);
+
+  // Eşik değerleri değiştiğinde PATIENT'a gönder (MONITOR modunda)
+  useEffect(() => {
+    if (currentScreen === 'remote' && getDeviceInfo().connected && getDeviceInfo().deviceType === 'monitor') {
+      // Eşik değerlerini güncelle
+      setMonitorThresholds(thresholds);
+    }
+  }, [thresholds, currentScreen]);
+
   // RemoteMonitoring sayfası
   if (currentScreen === 'remote') {
     return (
@@ -1041,7 +1159,14 @@ export default function App() {
         sensorData={sensorData}
         alarms={alarms}
         thresholds={thresholds}
-        onThresholdsChange={setThresholds}
+        onThresholdsChange={(newThresholds) => {
+          setThresholds(newThresholds);
+          // PATIENT'a gönder (MONITOR modunda)
+          if (getDeviceInfo().connected && getDeviceInfo().deviceType === 'monitor') {
+            const patientId = getDeviceInfo().deviceId; // Bu aslında paired patient ID olmalı
+            sendThresholds(patientId, newThresholds);
+          }
+        }}
       />
     );
   }

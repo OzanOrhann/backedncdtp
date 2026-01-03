@@ -1,5 +1,9 @@
 import { registerRootComponent } from 'expo';
 
+// ============================================
+// APP SEÇİMİ
+// ============================================
+// App.tsx backend entegrasyonu ile hazır
 import App from './App';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
